@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline/promises";
 
-for (const file of [".env.local", ".env"]) if (existsSync(file)) process.loadEnvFile(file);
+for (const file of [".env.local", ".env.secrets.local", ".env"]) if (existsSync(file)) process.loadEnvFile(file);
 
 const { getConfig, domainUrl } = await import("../src/config.js");
 const { getIvantiAuth } = await import("../src/discovery.js");

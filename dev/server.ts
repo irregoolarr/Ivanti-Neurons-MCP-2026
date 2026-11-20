@@ -5,7 +5,7 @@
 import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 
-for (const file of [".env.local", ".env"]) {
+for (const file of [".env.local", ".env.secrets.local", ".env"]) {
   if (existsSync(file)) process.loadEnvFile(file);
 }
 
