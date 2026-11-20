@@ -19,11 +19,12 @@ Ivanti sign-in fresh.
 Your Ivanti **AI Agent** registration only lets Ivanti send a sign-in back to Claude or to `localhost`. So the
 dashboard can't have its own "Sign in with Ivanti" button. Instead:
 
-1. You run `npm run login` **once on your computer**. It opens Ivanti's sign-in page in your browser.
-2. After you sign in, the script sends the long-lived Ivanti login token to your dashboard, protected by your
+1. You run `npm run login` **once on your computer**. Ivanti ties each sign-in to one MCP server, so the script
+   opens Ivanti's sign-in page once per domain (7 browser tabs). Sign in on the first and approve the rest.
+2. The script sends the long-lived Ivanti login tokens, one per domain, to your dashboard, protected by your
    dashboard password.
-3. The dashboard stores it in **Upstash Redis** and uses it to call the Ivanti MCP servers. Ivanti issues a new
-   token each time one is used, and the dashboard saves each new one.
+3. The dashboard stores them in **Upstash Redis** and uses them to call the Ivanti MCP servers. Ivanti issues a
+   new token each time one is used, and the dashboard saves each new one.
 
 > The dashboard sees Ivanti **with your account's permissions**. Anyone with the dashboard password can view
 > that data, so treat the password accordingly.

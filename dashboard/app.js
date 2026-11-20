@@ -6,7 +6,11 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
   const fmt = (n) => (n === null || n === undefined || Number.isNaN(n) ? "—" : Number(n).toLocaleString());
   const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : 0);
-  const humanize = (s) => String(s).replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const humanize = (s) =>
+    String(s)
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
   const COLORS = ["#6d28d9", "#f97316", "#eab308", "#10b981", "#0ea5e9", "#e11d48"];
   const LABELS = { macos: "macOS", ios: "iOS", ipados: "iPadOS", hp: "HP", "hp-ux": "HP-UX", vmware: "VMware", ad: "AD", aix: "AIX", ibm: "IBM", lg: "LG" };
   const label = (k) => {
@@ -67,6 +71,20 @@
     return null;
   }
 
+  /** Data of a successful tool call, or null. */
+  const dataOf = (domainId, tool) => {
+    const r = run(domainId, tool);
+    return r ? r.data : null;
+  };
+  /** Total rows of a paginated list result (pagination.total_count), else the row count. */
+  function listTotal(v) {
+    if (!v || typeof v !== "object") return null;
+    if (v.pagination && typeof v.pagination.total_count === "number") return v.pagination.total_count;
+    const rows = Array.isArray(v.items) ? v.items : Array.isArray(v.value) ? v.value : null;
+    return rows ? rows.length : null;
+  }
+  const field = (v, key) => (v && typeof v === "object" && typeof v[key] === "number" ? v[key] : null);
+
   function model() {
     const total = dev("device_count");
     const managed = dev("device_managed_count");
@@ -89,8 +107,21 @@
       warrantyExpiring: dev("device_warranty_expiring_count"),
       orgScore: org && org.OrganizationScore ? org.OrganizationScore.Score : null,
       subScores: org && org.DomainSubScores ? Object.entries(org.DomainSubScores).map(([k, v]) => ({ name: k, score: v && v.Score })) : [],
-      exposures: domainNumber("exposures", /(exposure|cve|vuln)/i) || domainNumber("exposures", /./),
-      eol: domainNumber("software-inventory", /(eol|end_?of_?life)/i),
+      exposures: (() => {
+        const n = listTotal(dataOf("exposures", "list_exposure_summaries"));
+        return n !== null ? { value: n, tool: "CVE exposures across the estate" } : domainNumber("exposures", /(exposure|cve|vuln)/i);
+      })(),
+      eol: (() => {
+        const tile = dataOf("software-inventory", "tile_software_inventory_and_upcoming_eol");
+        const row = tile && Array.isArray(tile.value) ? tile.value[0] : null;
+        if (row && typeof row.UpcomingEolSoftwareInventoryCount === "number") return { value: row.UpcomingEolSoftwareInventoryCount, installs: row.SoftwareInventoryCount };
+        return domainNumber("software-inventory", /(eol|end_?of_?life)/i);
+      })(),
+      exploited: field(dataOf("patch", "get_exploit_severity_summary"), "exploited"),
+      criticalExploits: field(dataOf("patch", "get_exploit_severity_summary"), "criticalExploits"),
+      riskPoor: field(dataOf("patch", "get_risk_score_summary"), "poor"),
+      riskGoodPct: field(dataOf("patch", "get_risk_score_summary"), "goodPercentage"),
+      patchDevices: listTotal(dataOf("patch", "patch_estate")),
     };
   }
 
@@ -138,12 +169,37 @@
         steps: ["Deploy the Neurons agent to priority device groups in waves", "Configure auto-enrollment policies for each OS type", "Review non-manageable records (printers, switches) and scope them out"],
       });
     }
+    if (m.exploited > 0) {
+      A.push({
+        id: "exploited", sev: "critical", count: m.exploited, unit: "exploited vulnerabilities",
+        title: "Patch Actively Exploited Vulnerabilities",
+        text: `Patch Management reports <b>${fmt(m.exploited)}</b> missing patches for actively exploited vulnerabilities` +
+          (m.criticalExploits ? ` (${fmt(m.criticalExploits)} critical exploits)` : "") + `. These are the highest-value fixes in the estate.`,
+        steps: ["Create a patch group for exploited CVEs", "Deploy to affected devices immediately", "Verify with a re-scan"],
+      });
+    }
     if (m.exposures && m.exposures.value > 0) {
       A.push({
         id: "exposures", sev: "critical", count: m.exposures.value, unit: "open exposures",
         title: "Remediate Critical Exposures",
         text: `${fmt(m.exposures.value)} exposures are currently open. Start with actively exploited and highest-risk CVEs.`,
         steps: ["Prioritize exploited / highest VRR CVEs", "Map CVEs to patch groups and deploy", "Re-scan and verify closure"],
+      });
+    }
+    if (m.riskPoor > 0) {
+      A.push({
+        id: "risk", sev: "high", count: m.riskPoor, unit: "devices with poor patch risk",
+        title: "Reduce Device Patch Risk",
+        text: `${fmt(m.riskPoor)} patch-managed devices have a <b>poor</b> risk score` + (m.riskGoodPct !== null ? `; only ${fmt(m.riskGoodPct)}% are rated good.` : "."),
+        steps: ["Review the patch policy assigned to poor-risk devices", "Schedule a catch-up deployment window"],
+      });
+    }
+    if (m.eol && m.eol.value > 0) {
+      A.push({
+        id: "eol", sev: "high", count: m.eol.value, unit: "upcoming EOL installs",
+        title: "Upgrade End-of-Life Software",
+        text: `${fmt(m.eol.value)} software installs reach end of life soon` + (m.eol.installs ? ` (out of ${fmt(m.eol.installs)} installs).` : "."),
+        steps: ["List affected titles in Software Inventory", "Package supported versions for distribution", "Retire unsupported titles"],
       });
     }
     if (m.avOff > 0) {
@@ -228,11 +284,11 @@
       kpi("Management Gap", gap === null ? "—" : gap + "%", m.total ? `Only ${fmt(m.managed)} of ${fmt(m.total)} devices managed` : "", "#e11d48",
         m.total ? `<div class="bar" style="display:flex"><i style="width:${pct(m.managed, m.total)}%;background:#10b981"></i><i style="width:${pct(m.quickWins || 0, m.total)}%;background:#c4b5fd;border-radius:0"></i></div>` : ""),
       m.exposures
-        ? kpi("Open Exposures", fmt(m.exposures.value), esc(humanize(m.exposures.tool)), "#e11d48")
+        ? kpi("Open Exposures", fmt(m.exposures.value), esc(/\s/.test(m.exposures.tool) ? m.exposures.tool : humanize(m.exposures.tool)), "#e11d48")
         : kpi("Antivirus Inactive", fmt(m.avOff), "Devices with AV installed but off", "#e11d48"),
       kpi("Expired Warranties", fmt(m.warrantyExpired), m.total ? `${pct(m.warrantyExpired || 0, m.total)}% of total fleet · ${fmt(m.warrantyExpiring)} expiring in 3 mo` : "", "#f97316"),
       m.eol
-        ? kpi("EOL Software", fmt(m.eol.value), "Titles approaching or past end of life", "#eab308")
+        ? kpi("EOL Software", fmt(m.eol.value), m.eol.installs ? `Upcoming end-of-life installs · ${fmt(m.eol.installs)} installs total` : "Approaching or past end of life", "#eab308")
         : kpi("Stale Devices", fmt(m.stale), "Not seen in 30 days", "#eab308"),
     ];
     out.push(`<div class="grid g4">${tiles.join("")}</div>`);
@@ -321,23 +377,61 @@
     return esc(v);
   }
 
-  function table(rows) {
+  const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /** Columns worth showing: skip ids, sort keys and other plumbing. */
+  function useful(rows, k) {
+    if (/(^id$|Id$|_id$|ForSorting$|^@odata|tenant|createdBy|lastEditedBy|lastModifiedBy|lastSavedBy|Sku$)/i.test(k)) return false;
+    const sample = rows.slice(0, 10).map((r) => r[k]).filter((x) => x !== null && x !== undefined && x !== "");
+    if (!sample.length) return false;
+    return !sample.every((x) => typeof x === "string" && (GUID.test(x) || /^[A-Za-z0-9_-]{20,}$/.test(x)));
+  }
+
+  function table(rows, total) {
     const cols = [];
-    for (const r of rows.slice(0, 25)) for (const k of Object.keys(r)) if (!cols.includes(k) && cols.length < 7) cols.push(k);
-    return `<div class="table-wrap"><table><thead><tr>${cols.map((c) => `<th>${esc(humanize(c))}</th>`).join("")}</tr></thead><tbody>${rows
+    for (const r of rows.slice(0, 25)) for (const k of Object.keys(r)) if (!cols.includes(k) && useful(rows, k)) cols.push(k);
+    const shown = cols.slice(0, 7);
+    const all = total ?? rows.length;
+    return `<div class="table-wrap"><table><thead><tr>${shown.map((c) => `<th>${esc(humanize(c))}</th>`).join("")}</tr></thead><tbody>${rows
       .slice(0, 15)
-      .map((r) => `<tr>${cols.map((c) => `<td title="${cell(r[c])}">${cell(r[c])}</td>`).join("")}</tr>`)
-      .join("")}</tbody></table></div>${rows.length > 15 ? `<p class="empty">Showing 15 of ${rows.length}${data ? "" : ""}.</p>` : ""}`;
+      .map((r) => `<tr>${shown.map((c) => `<td title="${cell(r[c])}">${cell(r[c])}</td>`).join("")}</tr>`)
+      .join("")}</tbody></table></div>${all > Math.min(15, rows.length) ? `<p class="empty">Showing ${Math.min(15, rows.length)} of ${fmt(all)}.</p>` : ""}`;
+  }
+
+  /** {a: 1, b: 2, ...} with only numbers (≥2) → bar items; percentage keys stay out. */
+  function numericObject(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const entries = Object.entries(v).filter(([k]) => !/percent/i.test(k));
+    if (entries.length < 2 || !entries.every(([, x]) => typeof x === "number")) return null;
+    return entries.map(([k, x]) => ({ key: humanize(k), value: x }));
+  }
+
+  /** Rows like [{Manufacturer, Installs}] or [{Manufacturer, Title, Installs}] → bar items. */
+  function rankedRows(rows) {
+    if (rows.length < 2 || rows.length > 30) return null;
+    const cols = Object.keys(rows[0]).filter((k) => useful(rows, k));
+    const numeric = cols.filter((k) => rows.every((r) => typeof r[k] === "number"));
+    const text = cols.filter((k) => rows.every((r) => typeof r[k] === "string"));
+    if (numeric.length !== 1 || !text.length || cols.length > 3) return null;
+    const labelCol = text.find((k) => /title|name/i.test(k)) || text[0];
+    return rows.map((r) => ({ key: r[labelCol], value: r[numeric[0]] }));
   }
 
   function renderValue(v) {
     const kv = keyValueItems(v);
     if (kv) return bars(kv);
+    const nums = numericObject(v);
+    if (nums) {
+      const pcts = Object.entries(v).filter(([k]) => /percent/i.test(k));
+      return bars(nums) + (pcts.length ? `<dl class="kv" style="margin-top:12px">${pcts.map(([k, x]) => `<dt>${esc(humanize(k))}</dt><dd>${fmt(x)}%</dd>`).join("")}</dl>` : "");
+    }
     const rows = arrayOfObjects(v);
-    if (rows && rows.length) return table(rows);
+    if (rows && rows.length === 1 && Object.values(rows[0]).every((x) => x === null || typeof x !== "object")) return renderValue(rows[0]);
+    const ranked = rows && rankedRows(rows);
+    if (ranked) return bars(ranked);
+    if (rows && rows.length) return table(rows, listTotal(v));
     if (rows && !rows.length) return `<p class="empty">No records.</p>`;
     if (v && typeof v === "object") {
-      const flat = Object.entries(v).filter(([, x]) => x === null || typeof x !== "object");
+      const flat = Object.entries(v).filter(([k, x]) => (x === null || typeof x !== "object") && useful([v], k));
       const nested = Object.entries(v).filter(([, x]) => x && typeof x === "object");
       let html = flat.length ? `<dl class="kv">${flat.map(([k, x]) => `<dt>${esc(humanize(k))}</dt><dd>${cell(x)}</dd>`).join("")}</dl>` : "";
       for (const [k, x] of nested.slice(0, 3)) html += `<h4 style="margin:14px 0 8px">${esc(humanize(k))}</h4>${renderValue(x)}`;
@@ -363,7 +457,12 @@
     }
     if (rest.length) {
       out.push(`<div class="grid g2">${rest
-        .map((r) => `<div class="card"><h3>${esc(r.title || humanize(r.tool))}</h3>${r.description ? `<p class="hint">${esc(r.description.split(/\n/)[0].slice(0, 160))}</p>` : ""}${renderValue(r.data)}<details><summary>Raw data</summary><pre class="raw">${esc(JSON.stringify(r.data, null, 2))}</pre></details></div>`)
+        .map((r) => {
+          const rows = keyValueItems(r.data) ? null : arrayOfObjects(r.data);
+          const n = rows && rows.length > 1 ? listTotal(r.data) : null;
+          return { r, n };
+        })
+        .map(({ r, n }) => `<div class="card"><h3>${esc(r.title || humanize(r.tool))}${n !== null ? ` <span class="badge green">${fmt(n)}</span>` : ""}</h3>${r.description ? `<p class="hint">${esc(r.description.split(/\n/)[0].slice(0, 160))}</p>` : ""}${renderValue(r.data)}<details><summary>Raw data</summary><pre class="raw">${esc(JSON.stringify(r.data, null, 2))}</pre></details></div>`)
         .join("")}</div>`);
     }
     out.push(failedRuns(d));
@@ -381,6 +480,9 @@
       ["Active antivirus", m.total && m.avOff !== null ? pct(m.total - m.avOff, m.total) : null, 100, "%", `${fmt(m.avOff)} devices with AV off`, true],
       ["Restarted within 30 days", m.total && m.noRestart !== null ? pct(m.total - m.noRestart, m.total) : null, 100, "%", `${fmt(m.noRestart)} pending restarts`, true],
     ];
+    if (m.exploited !== null) rows.push(["Exploited vulnerabilities", m.exploited, 0, "", "Missing patches for exploited CVEs", false]);
+    if (m.riskGoodPct !== null) rows.push(["Devices with good patch risk", m.riskGoodPct, 100, "%", `${fmt(m.riskPoor)} devices rated poor`, true]);
+    if (m.eol) rows.push(["Upcoming EOL software", m.eol.value, 0, "", "Installs reaching end of life", false]);
     if (m.exposures) rows.push(["Open exposures", m.exposures.value, 0, "", "Target: zero open exposures", false]);
     const card = ([name, cur, goal, unit, sub, higherIsBetter]) => {
       const done = cur !== null && (higherIsBetter ? cur >= goal : cur <= goal);
