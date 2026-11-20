@@ -70,10 +70,16 @@ export function getConfig(): Config {
   const domains = wanted ? ALL_DOMAINS.filter((d) => wanted.includes(d.id)) : ALL_DOMAINS;
   if (domains.length === 0) throw new Error("NEURONS_MCP_DOMAINS matched no known domain");
 
+  // The Neurons Auth URL looks like https://<landscape>.ivanticloud.com/<tenant-host>, e.g.
+  // https://nvuprd-sfc.ivanticloud.com/acme.ivanticloud.com — the hosted MCP servers live on the
+  // tenant host (https://acme.ivanticloud.com/mcp/<domain>/v1), so use it when present.
+  const tenantHost = new URL(authUrl).pathname.split("/").filter(Boolean)[0];
+  const defaultMcpBase = tenantHost && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(tenantHost) ? `https://${tenantHost}` : authUrl;
+
   cached = {
     authUrl,
     clientId: clientId!,
-    mcpBaseUrl: stripSlash(env("NEURONS_MCP_BASE_URL") ?? authUrl),
+    mcpBaseUrl: stripSlash(env("NEURONS_MCP_BASE_URL") ?? defaultMcpBase),
     domains,
     authorizationEndpoint: env("NEURONS_AUTHORIZATION_ENDPOINT"),
     tokenEndpoint: env("NEURONS_TOKEN_ENDPOINT"),

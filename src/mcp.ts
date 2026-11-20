@@ -71,8 +71,9 @@ async function handleMessage(msg: RpcMessage, token: string) {
   }
 }
 
-export async function handleMcp(req: Req, res: ServerResponse, base: string) {
-  const resourceMetadata = `${base}/.well-known/oauth-protected-resource`;
+/** `resourcePath` is the MCP URL path the client used: "/mcp" or "/". */
+export async function handleMcp(req: Req, res: ServerResponse, base: string, resourcePath: string) {
+  const resourceMetadata = `${base}/.well-known/oauth-protected-resource${resourcePath === "/" ? "" : resourcePath}`;
 
   if (req.method !== "POST") {
     // Stateless server: no standalone SSE stream (GET) and no sessions to delete (DELETE).

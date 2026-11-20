@@ -78,7 +78,7 @@ Claude ──► Vercel gateway /mcp ──► https://<tenant>/mcp/device/v1
    - each entry in `ivanti.probes` has `unauthenticatedStatus: 401`. This means the domain URL is right and
      asks for sign-in.
 
-   If the probes show `404`, the domain URLs are wrong. Set `NEURONS_MCP_BASE_URL` to just your tenant host
+   If the probes show `404`, the domain URLs are wrong. Set `NEURONS_MCP_BASE_URL` to your tenant host
    (`https://<tenant>.ivanticloud.com`) and redeploy.
 
 ## 3. Add it to Claude
@@ -86,7 +86,7 @@ Claude ──► Vercel gateway /mcp ──► https://<tenant>/mcp/device/v1
 **Claude.ai / Claude Desktop**
 
 1. Go to **Settings > Connectors > Add custom connector**.
-2. For the URL, enter `https://<your-app>.vercel.app/mcp`.
+2. For the URL, enter `https://<your-app>.vercel.app/mcp`. The root URL `https://<your-app>.vercel.app/` also works.
 3. Leave *Advanced settings* empty. The gateway supplies the Client ID.
 4. Click **Connect** and sign in to Ivanti.
 
@@ -129,7 +129,7 @@ The gateway runs at `http://localhost:3000/mcp`. Open `http://localhost:3000/hea
 | `NEURONS_AUTH_URL` | yes | Neurons Auth Url from the AI Agent registration |
 | `NEURONS_CLIENT_ID` | yes | Client ID from the AI Agent registration |
 | `NEURONS_MCP_DOMAINS` | no | comma-separated subset of domains (default: all seven) |
-| `NEURONS_MCP_BASE_URL` | no | base that `/mcp/<domain>/v1` is added to (default: the Auth URL) |
+| `NEURONS_MCP_BASE_URL` | no | base that `/mcp/<domain>/v1` is added to (default: the tenant host in the Auth URL, e.g. `https://nvuprd-sfc.ivanticloud.com/acme.ivanticloud.com` → `https://acme.ivanticloud.com`) |
 | `NEURONS_AUTHORIZATION_ENDPOINT`, `NEURONS_TOKEN_ENDPOINT` | no | set these if Ivanti's sign-in endpoints can't be found automatically |
 | `NEURONS_OAUTH_SCOPES` | no | scopes to request (default: the scopes Ivanti's servers advertise) |
 | `NEURONS_OAUTH_RESOURCE` | no | OAuth `resource` sent to Ivanti: `none` (default), `auto`, or explicit values |

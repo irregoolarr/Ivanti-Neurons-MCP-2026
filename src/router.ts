@@ -37,13 +37,17 @@ export async function route(req: Req, res: ServerResponse): Promise<void> {
   const base = publicBaseUrl(req);
 
   try {
+    // MCP is served at /mcp and also at / (POST), so either URL works in an MCP client.
+    if (path === "/" && req.method !== "GET" && req.method !== "HEAD") return await handleMcp(req, res, base, "/");
+
     switch (path) {
       case "/mcp":
-        return await handleMcp(req, res, base);
+        return await handleMcp(req, res, base, "/mcp");
 
       case "/.well-known/oauth-protected-resource":
+        return sendJson(res, 200, protectedResourceMetadata(base, (await getIvantiAuth()).scopes, "/"));
       case "/.well-known/oauth-protected-resource/mcp":
-        return sendJson(res, 200, protectedResourceMetadata(base, (await getIvantiAuth()).scopes));
+        return sendJson(res, 200, protectedResourceMetadata(base, (await getIvantiAuth()).scopes, "/mcp"));
 
       case "/.well-known/oauth-authorization-server":
       case "/.well-known/oauth-authorization-server/mcp":

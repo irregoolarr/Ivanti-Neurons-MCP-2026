@@ -12,9 +12,10 @@ import { getConfig } from "./config.js";
 import { getIvantiAuth } from "./discovery.js";
 import { readFormBody, readRawBody, sendJson, type Req } from "./util.js";
 
-export function protectedResourceMetadata(base: string, scopes: string[]) {
+/** `resourcePath` is "/mcp" or "/" — the MCP URL the client is using (both are served). */
+export function protectedResourceMetadata(base: string, scopes: string[], resourcePath: string) {
   return {
-    resource: `${base}/mcp`,
+    resource: `${base}${resourcePath}`,
     authorization_servers: [base],
     scopes_supported: scopes,
     bearer_methods_supported: ["header"],
