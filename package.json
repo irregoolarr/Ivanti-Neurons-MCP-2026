@@ -1,7 +1,7 @@
 {
   "name": "ivanti-neurons-mcp",
   "version": "1.0.0",
-  "description": "One MCP endpoint for all Ivanti Neurons MCP domains, deployable to Vercel.",
+  "description": "Live Ivanti Neurons dashboard (and MCP gateway) powered by Ivanti's hosted MCP servers, deployable to Vercel.",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,10 +10,12 @@
   "scripts": {
     "dev": "tsx watch dev/server.ts",
     "start": "tsx dev/server.ts",
+    "login": "tsx scripts/login.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@upstash/redis": "^1.41.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

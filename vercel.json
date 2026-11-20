@@ -5,6 +5,7 @@
     { "source": "/:path*", "destination": "/api/index?__path=:path*" }
   ],
   "functions": {
-    "api/index.ts": { "maxDuration": 300 }
-  }
+    "api/index.ts": { "maxDuration": 300, "includeFiles": "dashboard/**" }
+  },
+  "crons": [{ "path": "/api/cron/refresh", "schedule": "0 6 * * *" }]
 }

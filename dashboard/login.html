@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Sign in · Neurons Command Center</title>
+  <link rel="stylesheet" href="/assets/app.css?v={{VERSION}}" />
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login">
+    <div class="brand"><span class="brand-red">Ivanti</span> Neurons</div>
+    <p class="login-sub">Endpoint Command Center</p>
+    <label for="password">Dashboard password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus {{DISABLED}} />
+    <p class="login-error">{{ERROR}}</p>
+    <button type="submit" {{DISABLED}}>Sign in</button>
+  </form>
+</body>
+</html>

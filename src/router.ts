@@ -3,6 +3,7 @@
  */
 import type { ServerResponse } from "node:http";
 import { getConfig } from "./config.js";
+import { handleDashboard } from "./dashboard.js";
 import { getIvantiAuth } from "./discovery.js";
 import { handleMcp } from "./mcp.js";
 import { authorizationServerMetadata, handleAuthorize, handleRegister, handleToken, protectedResourceMetadata } from "./oauth.js";
@@ -40,6 +41,8 @@ export async function route(req: Req, res: ServerResponse): Promise<void> {
     // MCP is served at /mcp and also at / (POST), so either URL works in an MCP client.
     if (path === "/" && req.method !== "GET" && req.method !== "HEAD") return await handleMcp(req, res, base, "/");
 
+    if (await handleDashboard(req, res, path, url.searchParams)) return;
+
     switch (path) {
       case "/mcp":
         return await handleMcp(req, res, base, "/mcp");
@@ -62,7 +65,6 @@ export async function route(req: Req, res: ServerResponse): Promise<void> {
       case "/oauth/token":
         return req.method === "POST" ? await handleToken(req, res) : sendJson(res, 405, { error: "method_not_allowed" });
 
-      case "/":
       case "/health": {
         const cfg = getConfig();
         const out: Record<string, unknown> = {

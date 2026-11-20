@@ -1,160 +1,150 @@
-# Ivanti Neurons MCP Gateway (Vercel)
+# Ivanti Neurons Command Center (Vercel)
 
-**One MCP connector for all Ivanti Neurons MCP domains.**
+A live, password-protected **executive dashboard** for your Ivanti Neurons tenant, hosted on Vercel.
+It reads its data from **Ivanti's own hosted MCP servers** (the same ones Claude uses), so it shows exactly
+what the MCP tools provide:
 
-Ivanti hosts a separate MCP server for each domain (`https://<tenant>/mcp/<domain>/v1`), so normally you add
-7 connectors. This gateway runs on Vercel and puts them behind **one URL**:
+| Tab | What it shows |
+|---|---|
+| **Environment Action** | DEX organization score and sub-scores; management gap; open exposures; expired warranties; EOL software; prioritized recommended actions with checklists |
+| **Unified Endpoint** | discovered, managed and manageable devices; new and stale devices; restarts, disk space, antivirus and warranty; breakdowns by OS, manufacturer, type and discovery source |
+| **Exposures / Patch Status / Software Inventory / Software Distribution / Reporting / Data Services** | every read-only summary tool each domain offers, rendered as KPIs, bar charts or tables |
+| **Target State** | each KPI against its remediation target |
 
-```
-https://<your-app>.vercel.app/mcp
-```
+Data is cached for 15 minutes; **Refresh** fetches it again. A daily Vercel Cron job keeps the data and the
+Ivanti sign-in fresh.
 
-It uses the **AI Agent** app registration (Neurons Auth URL + Client ID). You don't need a client secret.
+## How sign-in works
 
-## How it works
+Your Ivanti **AI Agent** registration only lets Ivanti send a sign-in back to Claude or to `localhost`. So the
+dashboard can't have its own "Sign in with Ivanti" button. Instead:
 
-```
-Claude ──► Vercel gateway /mcp ──► https://<tenant>/mcp/device/v1
-              │                ├─► .../mcp/dataservices/v1
-              │                ├─► .../mcp/patch/v1
-              │                ├─► .../mcp/exposures/v1
-              │                ├─► .../mcp/software-inventory/v1
-              │                ├─► .../mcp/software-distribution/v1
-              │                └─► .../mcp/reporting/v1
-              │
-              └─ sign-in: the browser goes to Ivanti's own login page (OAuth + PKCE)
-```
+1. You run `npm run login` **once on your computer**. It opens Ivanti's sign-in page in your browser.
+2. After you sign in, the script sends the long-lived Ivanti login token to your dashboard, protected by your
+   dashboard password.
+3. The dashboard stores it in **Upstash Redis** and uses it to call the Ivanti MCP servers. Ivanti issues a new
+   token each time one is used, and the dashboard saves each new one.
 
-- **Sign-in.** When you add the connector, Claude opens Ivanti's sign-in page. The gateway gives Claude your
-  Client ID and passes the login steps through to Ivanti. Each person signs in with their own Ivanti account,
-  so Ivanti's permissions apply as usual.
-- **Tools.** The gateway lists the tools of every domain and adds a domain prefix to each name:
+> The dashboard sees Ivanti **with your account's permissions**. Anyone with the dashboard password can view
+> that data, so treat the password accordingly.
 
-  | Prefix | Ivanti domain |
-  |---|---|
-  | `device__` | device |
-  | `dataservices__` | dataservices |
-  | `patch__` | patch |
-  | `exposures__` | exposures |
-  | `swinventory__` | software-inventory |
-  | `swdist__` | software-distribution |
-  | `reporting__` | reporting |
+If the sign-in ever expires (the dashboard tells you), run `npm run login` again.
 
-  Calls go to the right Ivanti server with the user's own token.
-- **Missing domains.** A domain that isn't enabled or licensed on your tenant is skipped. The extra tool
-  `ivanti_connection_status` shows which domains work.
-- **Nothing stored.** The gateway keeps no tokens or data. Tool lists are cached in memory for 5 minutes.
+## Setup
 
-## 1. Ivanti setup
+### 1. Ivanti
 
-1. Sign in to Neurons as an administrator.
-2. Turn on **Admin > Settings > AI Settings > Enable Ivanti MCP servers**.
-3. Go to **Admin > App Registrations > New Registration**, choose **AI Agent**, and click **Continue**.
-4. Copy the **Neurons Auth Url** and **Client ID** before you click *Finish and close*. Ivanti shows them only once.
+1. Turn on **Admin > Settings > AI Settings > Enable Ivanti MCP servers**.
+2. Go to **Admin > App Registrations > New Registration**, choose **AI Agent**, and copy the **Neurons Auth Url**
+   and **Client ID**.
 
-## 2. Deploy to Vercel
+### 2. Vercel
 
-1. Push this folder to a GitHub repository.
-2. In Vercel, click **Add New > Project** and import the repository. Choose the framework preset **Other**.
-   No build settings are needed.
-3. Under **Settings > Environment Variables**, add:
+1. Import this GitHub repository as a new project with the framework preset **Other**.
+2. **Storage**: open the project's **Storage** tab, add **Upstash for Redis** (the free plan is enough) and
+   connect it to the project. This adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+3. **Environment Variables**: add these:
 
    | Variable | Value |
    |---|---|
-   | `NEURONS_AUTH_URL` | the Neurons Auth Url |
-   | `NEURONS_CLIENT_ID` | the Client ID |
+   | `NEURONS_AUTH_URL` | Neurons Auth Url |
+   | `NEURONS_CLIENT_ID` | Client ID |
+   | `DASHBOARD_PASSWORD` | a strong password for the dashboard |
+   | `CRON_SECRET` | any long random string (secures the daily refresh job) |
 
-4. Deploy. You can also deploy from the CLI:
+4. **Redeploy**, so the new variables take effect.
+5. Turn off **Deployment Protection** for Production, or keep it on if only your Vercel team should reach the
+   site.
 
-   ```bash
-   npx vercel --prod
-   ```
+### 3. Connect the dashboard to Ivanti (one time)
 
-5. Turn off **Vercel Deployment Protection** for Production (Settings > Deployment Protection). Otherwise
-   Claude gets Vercel's login page instead of the gateway.
-
-6. Open `https://<your-app>.vercel.app/health?probe=1` and check:
-   - `ivanti.source` starts with `metadata:`. This means Ivanti's sign-in endpoints were found.
-   - each entry in `ivanti.probes` has `unauthenticatedStatus: 401`. This means the domain URL is right and
-     asks for sign-in.
-
-   If the probes show `404`, the domain URLs are wrong. Set `NEURONS_MCP_BASE_URL` to your tenant host
-   (`https://<tenant>.ivanticloud.com`) and redeploy.
-
-## 3. Add it to Claude
-
-**Claude.ai / Claude Desktop**
-
-1. Go to **Settings > Connectors > Add custom connector**.
-2. For the URL, enter `https://<your-app>.vercel.app/mcp`. The root URL `https://<your-app>.vercel.app/` also works.
-3. Leave *Advanced settings* empty. The gateway supplies the Client ID.
-4. Click **Connect** and sign in to Ivanti.
-
-**Claude Code**
-
-```bash
-claude mcp add --transport http ivanti https://<your-app>.vercel.app/mcp
-```
-
-Then run `/mcp` in Claude Code and choose **Authenticate**.
-
-**VS Code / Cursor (`mcp.json`)**
-
-```json
-{ "servers": { "ivanti": { "type": "http", "url": "https://<your-app>.vercel.app/mcp" } } }
-```
-
-## Run locally
+On your computer, in this project folder, install the dependencies:
 
 ```bash
 npm install
 ```
 
-```bash
-cp .env.example .env.local
+Create a file named `.env.local` with:
+
+```
+NEURONS_AUTH_URL=<Neurons Auth Url>
+NEURONS_CLIENT_ID=<Client ID>
 ```
 
-Fill in `.env.local`, then:
+Then run:
+
+```bash
+npm run login -- --app https://<your-app>.vercel.app
+```
+
+Then:
+1. Sign in to Ivanti in the browser window that opens.
+2. When the script asks, enter your dashboard password.
+
+The script checks which MCP domains accept the sign-in. It also writes the tools each domain offers to
+`ivanti-tools.local.json`; that file is git-ignored and contains no data or tokens.
+
+Open `https://<your-app>.vercel.app` and sign in with the dashboard password.
+
+## Run locally
+
+Create `.env.local` from `.env.example` and fill it in, then:
 
 ```bash
 npm run dev
 ```
 
-The gateway runs at `http://localhost:3000/mcp`. Open `http://localhost:3000/health?probe=1` to check discovery.
+Open `http://localhost:3000`. Then, in a second terminal:
+
+```bash
+npm run login -- --app http://localhost:3000
+```
+
+Without Upstash variables, the local server keeps the sign-in in memory until it restarts.
 
 ## Configuration reference
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `NEURONS_AUTH_URL` | yes | Neurons Auth Url from the AI Agent registration |
-| `NEURONS_CLIENT_ID` | yes | Client ID from the AI Agent registration |
-| `NEURONS_MCP_DOMAINS` | no | comma-separated subset of domains (default: all seven) |
-| `NEURONS_MCP_BASE_URL` | no | base that `/mcp/<domain>/v1` is added to (default: the tenant host in the Auth URL, e.g. `https://nvuprd-sfc.ivanticloud.com/acme.ivanticloud.com` → `https://acme.ivanticloud.com`) |
-| `NEURONS_AUTHORIZATION_ENDPOINT`, `NEURONS_TOKEN_ENDPOINT` | no | set these if Ivanti's sign-in endpoints can't be found automatically |
-| `NEURONS_OAUTH_SCOPES` | no | scopes to request (default: the scopes Ivanti's servers advertise) |
-| `NEURONS_OAUTH_RESOURCE` | no | OAuth `resource` sent to Ivanti: `none` (default), `auto`, or explicit values |
-| `PUBLIC_BASE_URL` | no | public URL, if it isn't detected correctly (e.g. a custom domain behind a proxy) |
+| `NEURONS_AUTH_URL` | yes | Neurons Auth Url (AI Agent registration) |
+| `NEURONS_CLIENT_ID` | yes | Client ID (AI Agent registration) |
+| `DASHBOARD_PASSWORD` | yes | dashboard login; also authorizes `npm run login` uploads |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | yes on Vercel | Upstash Redis (added by the Vercel integration). `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` also work |
+| `CRON_SECRET` | recommended | protects `/api/cron/refresh` |
+| `SNAPSHOT_TTL_MINUTES` | no | cache lifetime, default 15 |
+| `SESSION_SECRET` | no | cookie signing key (default derived from the password) |
+| `NEURONS_MCP_DOMAINS` | no | subset of domains to query |
+| `NEURONS_MCP_BASE_URL` | no | MCP host (default: tenant host taken from the Auth URL) |
 
-## Troubleshooting
+## Safety
 
-| Symptom | What to check |
-|---|---|
-| Sign-in page shows "invalid redirect_uri" | Ivanti must allow the client's callback URL. For Claude.ai it is `https://claude.ai/api/mcp/auth_callback`. Ask Ivanti support if it isn't accepted. |
-| Sign-in shows "invalid_target" / "invalid resource" | Set `NEURONS_OAUTH_RESOURCE=auto`. |
-| Sign-in shows "invalid_scope" | Set `NEURONS_OAUTH_SCOPES` to the scopes Ivanti expects. |
-| Signed in, but some tools are missing | Call `ivanti_connection_status`. Missing domains are usually not enabled or not licensed. |
-| Every call asks you to sign in again | Ivanti may issue tokens for one domain only. Use `NEURONS_MCP_DOMAINS` to limit the gateway to the domains you need. |
+- **Read-only.** The dashboard only calls Ivanti tools that read data:
+  - the device domain uses a fixed list of count and breakdown tools;
+  - other domains use argument-free tools whose names mark them as summaries (count, summary, groups, list,
+    history and similar);
+  - tools whose names contain action verbs (create, delete, deploy, run and similar) are never called.
+- **Protected.** Every data endpoint needs the dashboard login, and the cron endpoint needs `CRON_SECRET`.
+- **Contained.** The Ivanti token is stored only in your Upstash database and never reaches the browser.
+
+## MCP gateway (`/mcp`)
+
+The project also contains an MCP gateway at `/mcp` that merges all 7 Ivanti domains into one connector.
+Claude currently **rejects** it at sign-in. Ivanti returns its own issuer (`iss`) to Claude, and Ivanti doesn't
+allow the gateway's callback URL, so the gateway can't replace it. Use the 7 direct connectors in Claude
+(`https://<tenant>.ivanticloud.com/mcp/<domain>/v1`) instead. If Ivanti support adds
+`https://<your-app>.vercel.app/oauth/callback` as an allowed redirect URL, the gateway can be finished.
 
 ## Project layout
 
 ```
-api/index.ts       Vercel function (vercel.json routes every path here)
-src/router.ts      routes: /mcp, /.well-known/*, /oauth/*, /health
-src/mcp.ts         MCP endpoint: merges the domains' tools and forwards calls
-src/upstream.ts    MCP client for Ivanti's hosted servers
-src/oauth.ts       sign-in pass-through to Ivanti (register / authorize / token)
-src/discovery.ts   finds Ivanti's OAuth endpoints and scopes automatically
-src/config.ts      environment variables and domain list
-dev/server.ts      local dev server
+api/index.ts        the Vercel function (vercel.json routes every path here)
+dashboard/          dashboard page, styles and client script
+scripts/login.ts    one-time Ivanti sign-in (npm run login)
+src/dashboard.ts    dashboard routes: login, data API, sign-in upload, cron
+src/collector.ts    calls the Ivanti MCP tools and builds the data snapshot
+src/ivantiAuth.ts   stores and refreshes the Ivanti token
+src/store.ts        Upstash Redis (in memory when running locally)
+src/session.ts      dashboard password and cookie
+src/router.ts       routing
+src/mcp.ts, src/oauth.ts, src/upstream.ts, src/discovery.ts   MCP gateway and Ivanti discovery
 ```
-# Ivanti-Neurons-MCP-2026

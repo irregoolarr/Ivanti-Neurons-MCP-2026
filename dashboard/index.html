@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Neurons Command Center</title>
+  <link rel="stylesheet" href="/assets/app.css?v={{VERSION}}" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="brand"><span class="brand-red">Ivanti</span> Neurons</div>
+        <div class="hero-title">Autonomous Endpoint Management Command Center — CISO / CIO Executive Briefing</div>
+        <div class="hero-meta" id="meta">Loading…</div>
+      </div>
+      <div class="hero-actions">
+        <span class="live-pill" id="live"><span class="dot"></span>Live Data</span>
+        <button class="ghost-btn" id="refresh" type="button">Refresh</button>
+        <a class="ghost-btn" href="/logout">Sign out</a>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Dashboard sections"></nav>
+  </header>
+
+  <div class="subbar">
+    <span class="tag" id="tag">CURRENT STATE</span>
+    <strong id="view-title">Overview</strong>
+    <span class="subbar-desc" id="view-desc"></span>
+  </div>
+
+  <main id="main" class="main">
+    <div class="loading"><div class="spinner"></div>Collecting live data from Ivanti Neurons… the first load can take up to a minute.</div>
+  </main>
+
+  <footer class="footer">Data from Ivanti Neurons MCP servers · <span id="foot"></span></footer>
+  <script src="/assets/app.js?v={{VERSION}}"></script>
+</body>
+</html>

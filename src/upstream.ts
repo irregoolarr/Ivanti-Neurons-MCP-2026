@@ -20,13 +20,13 @@ export function exposedToolName(domain: Domain, name: string): string {
   return `${domain.prefix}${SEP}${name}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
 }
 
-function statusOf(err: unknown): number | undefined {
+export function statusOf(err: unknown): number | undefined {
   if (err instanceof StreamableHTTPError) return err.code;
   const m = err instanceof Error ? err.message.match(/HTTP (\d{3})/) : null;
   return m ? Number(m[1]) : undefined;
 }
 
-async function withClient<T>(domain: Domain, token: string, timeout: number, fn: (c: Client) => Promise<T>): Promise<T> {
+export async function withClient<T>(domain: Domain, token: string, timeout: number, fn: (c: Client) => Promise<T>): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(domainUrl(domain)), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
