@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 import { getSnapshot } from "./collector.js";
-import { SignInRequiredError, getAccessToken, getStoredAuth, saveSignIn } from "./ivantiAuth.js";
+import { SignInRequiredError, getAccessToken, saveSignIn } from "./ivantiAuth.js";
 import { domainUrl, getConfig } from "./config.js";
 import { checkPassword, clearLoginCookie, dashboardPassword, hasAdminBearer, isLoggedIn, safeEqual, setLoginCookie } from "./session.js";
 import { getStore } from "./store.js";
@@ -99,12 +99,10 @@ export async function handleDashboard(req: Req, res: ServerResponse, path: strin
       }
       try {
         const { snapshot, cached } = await getSnapshot(query.get("refresh") === "1");
-        const auth = await getStoredAuth();
         sendJson(res, 200, {
           ...snapshot,
           cached,
           persistentStore: getStore().persistent,
-          tokenMode: auth?.mode,
           tenantHost: new URL(getConfig().mcpBaseUrl).host,
         });
       } catch (err) {
@@ -121,23 +119,32 @@ export async function handleDashboard(req: Req, res: ServerResponse, path: strin
     case "/api/admin/ivanti-token": {
       if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" }), true;
       if (!hasAdminBearer(req)) return sendJson(res, 401, { error: "unauthorized" }), true;
-      let body: { refreshToken?: string; mode?: string };
+      let body: { refreshTokens?: Record<string, unknown> };
       try {
         body = JSON.parse(await readRawBody(req));
       } catch {
         return sendJson(res, 400, { error: "invalid_json" }), true;
       }
-      if (!body.refreshToken) return sendJson(res, 400, { error: "refreshToken required" }), true;
-      await saveSignIn(body.refreshToken, body.mode === "per-resource" ? "per-resource" : "shared");
+      const known = new Set(getConfig().domains.map((d) => d.id));
+      const tokens = Object.fromEntries(
+        Object.entries(body.refreshTokens ?? {}).filter(([k, v]) => known.has(k) && typeof v === "string" && v.length > 0),
+      ) as Record<string, string>;
+      if (Object.keys(tokens).length === 0) return sendJson(res, 400, { error: "refreshTokens required" }), true;
+      await saveSignIn(tokens);
       await getStore().del("ivanti:snapshot");
-      try {
-        // Prove it works now (this also rotates the refresh token into the store).
-        const device = getConfig().domains.find((d) => d.id === "device") ?? getConfig().domains[0];
-        await getAccessToken(device.id, domainUrl(device));
-        sendJson(res, 200, { ok: true, persistentStore: getStore().persistent });
-      } catch (err) {
-        sendJson(res, 400, { error: "token_check_failed", message: err instanceof Error ? err.message : String(err) });
+      // Prove each works now (this also rotates the refresh tokens into the store).
+      const results: Record<string, string> = {};
+      for (const id of Object.keys(tokens)) {
+        const d = getConfig().domains.find((x) => x.id === id)!;
+        try {
+          await getAccessToken(d.id, domainUrl(d));
+          results[id] = "ok";
+        } catch (err) {
+          results[id] = err instanceof Error ? err.message : String(err);
+        }
       }
+      const okCount = Object.values(results).filter((r) => r === "ok").length;
+      sendJson(res, okCount ? 200 : 400, { ok: okCount > 0, results, persistentStore: getStore().persistent });
       return true;
     }
 

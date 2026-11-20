@@ -146,8 +146,8 @@ async function collectDomain(domain: Domain): Promise<DomainData> {
   const base: DomainData = { id: domain.id, label: domain.label, ok: false, runs: [] };
   const url = domainUrl(domain);
 
-  const attempt = async (forceResource: boolean) => {
-    const token = await getAccessToken(domain.id, url, forceResource);
+  const attempt = async () => {
+    const token = await getAccessToken(domain.id, url);
     return withClient(domain, token, CALL_TIMEOUT_MS, async (client) => {
       const tools: Tool[] = [];
       let cursor: string | undefined;
@@ -169,24 +169,23 @@ async function collectDomain(domain: Domain): Promise<DomainData> {
   };
 
   try {
-    try {
-      return await attempt(false);
-    } catch (err) {
-      // A shared token may be rejected by some domains; retry with a token for this domain only.
-      if (err instanceof UpstreamAuthError) return await attempt(true);
-      throw err;
-    }
+    return await attempt();
   } catch (err) {
-    if (err instanceof SignInRequiredError) throw err;
-    return { ...base, error: err instanceof Error ? err.message : String(err) };
+    const message =
+      err instanceof UpstreamAuthError ? "Ivanti rejected the sign-in for this domain. Run `npm run login` again." : err instanceof Error ? err.message : String(err);
+    return { ...base, error: message };
   }
 }
 
 export async function collectSnapshot(): Promise<Snapshot> {
   const started = Date.now();
   const auth = await getStoredAuth();
-  if (!auth) throw new SignInRequiredError();
+  if (!auth || auth.domains.length === 0) throw new SignInRequiredError();
   const domains = await mapLimit(getConfig().domains, 3, collectDomain);
+  // Every domain failed because the stored sign-ins expired: surface it as "sign-in required".
+  if (domains.every((d) => !d.ok && /sign-in|signed in/i.test(d.error ?? ""))) {
+    throw new SignInRequiredError(domains[0]?.error);
+  }
   return {
     generatedAt: new Date().toISOString(),
     durationMs: Date.now() - started,
